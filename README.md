@@ -8,7 +8,7 @@ catalogs**, then trains emulators that predict a halo's stellar mass (`log10 Mâ˜
 halo mass, formation history, and the box's cosmo/astro parameters.
 
 > **Note on paths:** the scripts and notebooks use absolute `/home/jovyan/...` paths because
-> they were written to run on the **SDSC binder** environment where the CAMELS data lives.
+> they were written to run on the **Flatiron binder** environment where the CAMELS data lives.
 > Adjust the `*_ROOT` / `OUT_DIR` config constants near the top of each file to run elsewhere.
 
 ---
