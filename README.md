@@ -30,6 +30,89 @@ run_emulator.ipynb                                      (load model + predict)
 
 ---
 
+## Data
+
+The generated catalogs and training tables are hosted on Google Drive (they're too large
+for the repo and are excluded by [`.gitignore`](.gitignore)):
+
+**📂 [CAMELS-SHMR data on Google Drive](https://drive.google.com/drive/folders/1Z2LaEqqnqsJxTcM6aoaNZhM2P7cBoqLF?usp=sharing)**
+
+It contains two things:
+
+1. **`emulator_training_table_snapshot_90.parquet`** — the flat, ready-to-train table for the
+   **z=0 (snapshot 90)** emulators. One row per selected halo, written from
+   [`shmr_emulator.ipynb`](shmr_emulator.ipynb) via
+   `df.to_parquet(..., engine='fastparquet')`. Read it back with:
+   ```python
+   import pandas as pd
+   df = pd.read_parquet('emulator_training_table_snapshot_90.parquet', engine='fastparquet')
+   ```
+2. **A tarball of the per-snapshot HDF5 catalogs** — the full set of `SB35_<i>_dm_mass_history.hdf5`
+   files (one per box, *all* snapshots, not just z=0), produced by
+   [`camels_merger_history_parallel.py`](camels_merger_history_parallel.py). Unpack with
+   `tar -xzf <name>.tar.gz`.
+
+### Format of the snapshot-90 training table (`.parquet`)
+
+Each row is one z=0 central halo (above the `log10 M200c > 11` mass cut). Columns:
+
+| Column | Description |
+|--------|-------------|
+| `M200c` | FoF M200c at snapshot 90 [physical Msun] |
+| `t_form_10`, `t_form_25`, `t_form_50`, `t_form_90` | cosmic age [Gyr] at which the main-progenitor branch first reached 10/25/50/90% of its z=0 M200c |
+| *(35 cosmo/astro params)* | the box's parameters, taken straight from the `CosmoAstroSeed_*.txt` column names (the `seed` column dropped) — e.g. `Omega_m`, `sigma_8`, `A_SN1`, `A_SN2`, `A_AGN1`, `A_AGN2`, … These are the `PARAM_KEYS` used as model features. |
+| `box` | integer box index (`i` in `SB35_i`), used for the by-box train/test split |
+| `Mstar` | subhalo stellar mass [physical Msun] — the prediction **target** |
+| `logM200c` | `log10(M200c)` (feature) |
+| `logMstar` | `log10(Mstar)` (target the model is trained on) |
+
+The emulator features are `FEATURES = ['logM200c'] + ['t_form_10','t_form_25','t_form_50','t_form_90'] + PARAM_KEYS`,
+and the target is `logMstar`. (Rows with `Mstar <= 0`, `M200c <= 0`, or any `NaN` feature are
+dropped before saving.)
+
+### Format of the per-snapshot HDF5 catalogs (in the tarball)
+
+One file per box, `SB35_<i>_dm_mass_history.hdf5`, written by
+[`camels_merger_history_parallel.py`](camels_merger_history_parallel.py). Structure:
+
+- **Root attributes** — run metadata and the box's cosmo/astro parameters:
+  `title`, `simulation`, `basePath`, `z0_snapshot` (90), `mass_unit`,
+  `mass_cut_log10Msun` (11.0), `formation_percents` (`[10,25,50,90]`), `baryon_fraction`,
+  plus every cosmo/astro parameter (`Omega_m`, `Omega_b`, `Omega_L`, `hubble_h`, `sigma_8`, …).
+- **One group per snapshot**, named `snap_000` … `snap_090`. Each group has attrs
+  `snapshot`, `redshift`, `age_Gyr`, `n_halos`, and the following equal-length datasets
+  (one entry per halo present at that snapshot), each carrying a `description` attribute:
+
+  | Dataset | Description |
+  |---------|-------------|
+  | `GroupNumber` | FoF group index (`SubhaloGrNr`) at this snapshot |
+  | `GroupFirstSub` | main-progenitor subhalo index (`SubfindID`) at this snapshot |
+  | `M200c_snap` | FoF M200c at this snapshot [physical Msun] |
+  | `M200c_z0` | FoF M200c of the z=0 root halo [physical Msun] |
+  | `Mstar` | subhalo stellar mass [physical Msun] |
+  | `ISM_mass` | ISM gas mass within 2·r_half [physical Msun] |
+  | `CGM_mass` | total subhalo gas − ISM [physical Msun] |
+  | `fcgm` | `CGM_mass / M200c / baryon_fraction` |
+  | `SFR` | subhalo star-formation rate [Msun/yr] |
+  | `SplashbackFlag` | 1 if any progenitor was ever >10× the z=0 mass, else 0 |
+  | `t_form_10/25/50/90` | interpolated cosmic age [Gyr] at 10/25/50/90% of the z=0 M200c |
+
+The "extended" catalogs (from `*_extended.py` / `camels_add_extended_fields.py`) add
+`M500c_snap`, `SubhaloVelDisp`, `SubhaloVmax`, and `SubhaloSpin` to each snapshot group.
+
+Minimal read example:
+
+```python
+import h5py
+with h5py.File('SB35_0_dm_mass_history.hdf5', 'r') as f:
+    print(dict(f.attrs))                 # box params + run metadata
+    g = f['snap_090']                    # z=0
+    mstar = g['Mstar'][:]                # one value per halo
+    m200  = g['M200c_snap'][:]
+```
+
+---
+
 ## Files
 
 ### Catalog-building scripts (run these first)
